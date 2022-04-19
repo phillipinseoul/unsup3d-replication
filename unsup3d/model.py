@@ -64,7 +64,14 @@ class Unsup3D():
         self.diff_light_rescaler = lambda x : (1+x)/2 * self.max_diff_light + (1-x)/2 * self.min_diff_light
     
     def init_optimizers(self):
-        pass
+        self.optimizer_names = []
+        
+        # init optimizer for each network in Unsup3D
+        for net_name in self.network_names:
+            optimizer = self.make_optimizer(getattr(self, net_name))
+            optim_name = net_name.replace('net', 'optimizer')
+            setattr(self, optim_name, optimizer)
+            self.optimizer_names += [optim_name]
     
     def load_model_state(self, cp):
         pass
@@ -88,13 +95,97 @@ class Unsup3D():
         pass
 
     def photometric_loss(self, im1, im2, mask=None, conf_sigma=None):
-        pass
+        loss = (im1 - im2).abs()
+
+        if conf_sigma is not None:
+            loss = loss * 2 ** 0.5 / (conf_sigma + EPS) + (conf_sigma + EPS).log()
+        if mask is not None:
+            mask = mask.expand_as(loss)
+            loss = (loss * mask).sum() / mask.sum()
+        else:
+            loss = loss.mean()
+        return loss
 
     def backward(self):
-        pass
+        for optim_name in self.optimizer_names:
+            getattr(self, optim_name).zero_grad()
+        self.loss_total.backward()
+        for optim_name in self.optimizer_names:
+            getattr(self, optim_name).step()
 
     def forward(self, input):
-        pass
+        """Feedforward once."""
+
+        # ground truth
+        if self.load_gt_depth:
+            input, depth_gt = input
+
+        self.input_im = input.to(self.device) *2.-1.
+        b, c, h, w = self.input_im.shape
+
+        ### predict canonical depth (netD)
+        self.canon_depth_raw = self.netD(self.input_im).squeeze(1)      # B x H x W
+        self.canon_depth = self.canon_depth_raw - self.warp_canon_depth.view(b, -1).mean(1).view(b, 1, 1)
+        self.canon_depth = self.canon_depth.tanh()
+        self.canon_depth = self.depth_rescaler(self.canon_depth)
+
+        ### optional depth smoothness loss (only used in synthetic car experiments)
+        ''' Implement later '''
+    
+        ### clamp border depth
+        depth_boarder = torch.zeros(1, h, w - 4).to(self.input_im.device)
+        depth_boarder = nn.functional.pad(depth_boarder, (2, 2), mode='constant', value=1)
+        self.canon_depth = self.canon_depth * (1 - depth_boarder) + depth_boarder * self.border_depth
+        self.canon_depth = torch.cat([self.canon_depth, self.canon_depth.flip(2)], 0)   # flip
+
+        ### predict canonical albedo (netA)
+        self.canon_albedo = self.netA(self.input_im)
+        self.canon_albedo = torch.cat([self.canon_albedo, self.canon_albedo.flip(3)], 0)    # flip
+
+        ### predict confidence map
+        ''' Implement later '''
+
+        ### predict lighting (netL)
+        canon_light = self.netL(self.input_im).repeat(2, 1)     # B x 4
+        self.canon_light_a = self.amb_light_rescaler(canon_light[:, :1])    # ambience term (주변광)
+        self.canon_light_b = self.diff_light_rescaler(canon_light[:, 1:2])  # diffuse term (분산광)
+        
+        canon_light_dxy = canon_light[:, 2:]
+        self.canon_light_d = torch.cat([canon_light_dxy, torch.ones(b * 2, 1).to(self.input_im.device)], 1)
+        self.canon_light_d = self.canon_light_d / ((self.canon_light ** 2).sum(1, keepdim=True)) ** 0.5     # diffuse light direction  
+
+        ### shading
+        self.canon_normal = self.renderer.get_normal_from_depth(self.canon_depth)
+        self.canon_diffuse_shading = (self.canon_normal * self.canon_d.view(-1, 1, 1, 3)).sum(3).clamp(min=0).unsqueeze(1)
+        
+        # use ambience lighting and diffuse lighting to compute the shading
+        canon_shading = self.canon_light_a.view(-1, 1, 1, 1) + self.canon_light_b.view(-1, 1, 1, 1) * self.canon_diffuse_shading
+        self.canon_im = (self.canon_albedo / 2 + 0.5) * canon_shading *2-1
+                
+        ### predict viewpoint transformation (netV)
+        self.view = self.netV(self.input_im).repeat(2, 1)
+        self.view = torch.cat([
+            self.view[:, :3] * (math.pi/180) * self.xyz_rotation_range,
+            self.view[:, 3:5] * self.xy_translation_range,
+            self.view[:, 5:] * self.z_translation_range
+        ], 1)
+
+        ### reconstruct input view
+        
+
+
+
+        ### render symmetry axis
+
+
+
+
+        ### loss function
+
+
+        
+
+
 
     def visualize(self, logger, total_iter, max_bs=25):
         pass
