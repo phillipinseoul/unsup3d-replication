@@ -7,8 +7,7 @@ import torchvision
 
 import networks
 import utils
-# import renderer
-# from renderer import Renderer
+from renderer import Renderer
 
 # from . import networks      # import everything from networks.py
 # from . import utils         # import everything from utils.py
