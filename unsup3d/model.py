@@ -47,6 +47,9 @@ class Unsup3D():
         self.netL = networks.Encoder(cin=3, cout=4, nf=32)
         self.netV = networks.Encoder(cin=3, cout=6, nf=32)
 
+        if self.use_conf_map:
+            self.netC = networks.ConfNet(cin=3, cout=2, nf=64, zdim=128)
+
         self.network_names = [k for k in vars(self) if 'net' in k]
 
         self.make_optimizer = lambda model: torch.optim.Adam(
@@ -160,6 +163,8 @@ class Unsup3D():
         
         # use ambience lighting and diffuse lighting to compute the shading
         canon_shading = self.canon_light_a.view(-1, 1, 1, 1) + self.canon_light_b.view(-1, 1, 1, 1) * self.canon_diffuse_shading
+        
+        # create canonical image
         self.canon_im = (self.canon_albedo / 2 + 0.5) * canon_shading *2-1
                 
         ### predict viewpoint transformation (netV)
@@ -171,17 +176,33 @@ class Unsup3D():
         ], 1)
 
         ### reconstruct input view
+        self.renderer.set_transform_matrices(self.view)
+        self.recon_depth = self.renderer.warp_canon_depth(self.canon_depth)
+        self.recon_normal = self.renderer.get_normal_from_depth(self.recon_depth)
+
+        grid_2d_from_canon = self.renderer.get_inv_warped_2d_grid(self.recon_depth)
         
+        # compute the reconstruction using the canonical image & depth map
+        self.recon_im = nn.functional.grid_sample(self.canon_im, grid_2d_from_canon, mode='bilinear')
 
-
+        margin = (self.max_depth - self.min_depth) / 2
+        recon_im_mask = (self.recon_depth < (self.max_depth + margin)).float()  # `invalid border pixels` have been clamped at max_depth+margin
+        recon_im_mask_both = recon_im_mask[: b] * recon_im_mask[b: ]            # both original and flip reconstruction
+        recon_im_mask_both = recon_im_mask_both.repeat(2, 1, 1).unsqueeze(1).detach()
+        
+        # image reconstruction!
+        self.recon_im = self.recon_im * recon_im_mask_both
 
         ### render symmetry axis
-
-
-
+        canon_sym_axis = torch.zeros(h, w).to(self.input_im.device)
+        canon_sym_axis[:, w//2 - 1 : w//2 + 1] = 1
+        self.recon_sym_axis = nn.functional.grid_sample(canon_sym_axis.repeat(b * 2, 1, 1, 1), grid_2d_from_canon, mode='bilinear')
+        self.recon_sym_axis = self.recon_sys_axis * recon_im_mask_both
+        green = torch.FloatTensor([-1, 1, -1]).to(self.input_im.device).view(1, 3, 1, 1)
+        self.input_im_symline = (0.5 * self.recon_sym_axis) * green + (1 - 0.5 * self.recon_sym_axis) * self.input_im_repeat(2, 1, 1, 1)
 
         ### loss function
-
+        self.loss_l1_im = self.photometric_loss(self.recon_im[: b], self.input_im, mask=recon_im_mask_both[: b], conf_sigma=self.conf_sigma_l1)
 
         
 
