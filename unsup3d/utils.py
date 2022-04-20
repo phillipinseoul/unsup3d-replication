@@ -56,4 +56,7 @@ def xmkdir(path):
     """Create directory PATH recursively if it does not exist."""
     os.makedirs(path, exist_ok=True)
 
+def save_scores(out_path, scores, header=''):
+    print('Saving scores to %s' %out_path)
+    np.savetxt(out_path, scores, fmt='%.8f', delimiter=',\t', header=header)
 
