@@ -20,3 +20,13 @@ ssh -N -f -L localhost:16006:localhost:6006 <user@remote>
 ```
 tensorboard --logdir results/logs --port 6006
 ```
+* See Tensorboard in http://localhost:16006/
+
+#### Training Loss
+![loss](./imgs/img2.png)
+
+#### Reconstruction Pipeline
+![recon](./imgs/img1.png)
+
+#### Depth
+![depth](./imgs/img3.png)
