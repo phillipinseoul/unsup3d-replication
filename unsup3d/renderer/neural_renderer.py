@@ -1,8 +1,8 @@
 import torch
 import math
 import neural_renderer as nr
-# from .utils import *
-import utils
+from .utils import *
+# import utils
 
 EPS = 1e-7
 
@@ -27,8 +27,10 @@ class Renderer():
         R = [[[1.,0.,0.],
               [0.,1.,0.],
               [0.,0.,1.]]]
+
         R = torch.FloatTensor(R).to(self.device)
         t = torch.zeros(1,3, dtype=torch.float32).to(self.device)
+
         fx = (self.image_size-1)/2/(math.tan(self.fov/2 *math.pi/180))
         fy = (self.image_size-1)/2/(math.tan(self.fov/2 *math.pi/180))
         cx = (self.image_size-1)/2
@@ -39,6 +41,7 @@ class Renderer():
         K = torch.FloatTensor(K).to(self.device)
         self.inv_K = torch.inverse(K).unsqueeze(0)
         self.K = K.unsqueeze(0)
+
         self.renderer = nr.Renderer(camera_mode='projection',
                                     light_intensity_ambient=1.0,
                                     light_intensity_directional=0.,

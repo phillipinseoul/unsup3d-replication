@@ -13,11 +13,13 @@ args = parser.parse_args()
 # set up
 cfgs = setup_runtime(args)
 trainer = Trainer(cfgs, Unsup3D)
+
 run_train = cfgs.get('run_train', False)
 run_test = cfgs.get('run_test', False)
 
 # run
 if run_train:
+    print('strat training')
     trainer.train()
 if run_test:
     trainer.test()

@@ -105,3 +105,4 @@ def get_textures_from_im(im, tx_size=1):
     else:
         raise NotImplementedError("Currently support texture size of 1 or 2 only.")
     return textures
+

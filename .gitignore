@@ -3,3 +3,4 @@ data/*/
 results
 neural_renderer
 *.zip
+unsup3d/__pycache__

@@ -5,13 +5,15 @@ import torch
 import torch.nn as nn
 import torchvision
 
-import networks
-import utils
-from renderer import Renderer
+# import networks
+# import utils
+# from renderer import Renderer
 
-# from . import networks      # import everything from networks.py
-# from . import utils         # import everything from utils.py
-# from .renderer import Renderer
+from . import networks      # import everything from networks.py
+from . import utils         # import everything from utils.py
+from .renderer import Renderer
+
+EPS = 1e-7
 
 # Define class Unsup3D()
 class Unsup3D():
@@ -59,7 +61,7 @@ class Unsup3D():
 
         # define other parameters
         self.PerceptualLoss = networks.PerceptualLoss(requires_grad=False)
-        self.other_params_names = ['PerceptualLoss']
+        self.other_param_names = ['PerceptualLoss']
 
         # define depth rescaler: -1 ~ 1 --> min_depth ~ max_depth
         self.depth_rescaler = lambda d : (1+d)/2 * self.max_depth + (1-d)/2 * self.min_depth
@@ -144,7 +146,7 @@ class Unsup3D():
 
         ### predict canonical depth (netD)
         self.canon_depth_raw = self.netD(self.input_im).squeeze(1)      # B x H x W
-        self.canon_depth = self.canon_depth_raw - self.warp_canon_depth.view(b, -1).mean(1).view(b, 1, 1)
+        self.canon_depth = self.canon_depth_raw - self.canon_depth_raw.view(b, -1).mean(1).view(b, 1, 1)
         self.canon_depth = self.canon_depth.tanh()
         self.canon_depth = self.depth_rescaler(self.canon_depth)
 
@@ -181,11 +183,11 @@ class Unsup3D():
         
         canon_light_dxy = canon_light[:, 2:]
         self.canon_light_d = torch.cat([canon_light_dxy, torch.ones(b * 2, 1).to(self.input_im.device)], 1)
-        self.canon_light_d = self.canon_light_d / ((self.canon_light ** 2).sum(1, keepdim=True)) ** 0.5     # diffuse light direction  
+        self.canon_light_d = self.canon_light_d / ((self.canon_light_d ** 2).sum(1, keepdim=True)) ** 0.5     # diffuse light direction  
 
         ### shading
         self.canon_normal = self.renderer.get_normal_from_depth(self.canon_depth)
-        self.canon_diffuse_shading = (self.canon_normal * self.canon_d.view(-1, 1, 1, 3)).sum(3).clamp(min=0).unsqueeze(1)
+        self.canon_diffuse_shading = (self.canon_normal * self.canon_light_d.view(-1, 1, 1, 3)).sum(3).clamp(min=0).unsqueeze(1)
         
         # use ambience lighting and diffuse lighting to compute the shading
         canon_shading = self.canon_light_a.view(-1, 1, 1, 1) + self.canon_light_b.view(-1, 1, 1, 1) * self.canon_diffuse_shading
@@ -223,9 +225,9 @@ class Unsup3D():
         canon_sym_axis = torch.zeros(h, w).to(self.input_im.device)
         canon_sym_axis[:, w//2 - 1 : w//2 + 1] = 1
         self.recon_sym_axis = nn.functional.grid_sample(canon_sym_axis.repeat(b * 2, 1, 1, 1), grid_2d_from_canon, mode='bilinear')
-        self.recon_sym_axis = self.recon_sys_axis * recon_im_mask_both
+        self.recon_sym_axis = self.recon_sym_axis * recon_im_mask_both
         green = torch.FloatTensor([-1, 1, -1]).to(self.input_im.device).view(1, 3, 1, 1)
-        self.input_im_symline = (0.5 * self.recon_sym_axis) * green + (1 - 0.5 * self.recon_sym_axis) * self.input_im_repeat(2, 1, 1, 1)
+        self.input_im_symline = (0.5 * self.recon_sym_axis) * green + (1 - 0.5 * self.recon_sym_axis) * self.input_im.repeat(2, 1, 1, 1)
 
         ### loss function
         self.loss_l1_im = self.photometric_loss(self.recon_im[: b], self.input_im, mask=recon_im_mask_both[: b], conf_sigma=self.conf_sigma_l1)
@@ -301,13 +303,13 @@ class Unsup3D():
         canon_normal_rotate_grid = [torchvision.utils.make_grid(img, nrow=int(math.ceil(b0**0.5))) for img in torch.unbind(canon_normal_rotate, 1)]  # [(C,H,W)]*T
         canon_normal_rotate_grid = torch.stack(canon_normal_rotate_grid, 0).unsqueeze(0)  # (1,T,C,H,W)
 
-        ## write summary
+        ## write summary for tensorboardX
         logger.add_scalar('Loss/loss_total', self.loss_total, total_iter)
         logger.add_scalar('Loss/loss_l1_im', self.loss_l1_im, total_iter)
         logger.add_scalar('Loss/loss_l1_im_flip', self.loss_l1_im_flip, total_iter)
         logger.add_scalar('Loss/loss_perc_im', self.loss_perc_im, total_iter)
         logger.add_scalar('Loss/loss_perc_im_flip', self.loss_perc_im_flip, total_iter)
-        logger.add_scalar('Loss/loss_depth_sm', self.loss_depth_sm, total_iter)
+        # logger.add_scalar('Loss/loss_depth_sm', self.loss_depth_sm, total_iter)
 
         logger.add_histogram('Depth/canon_depth_raw_hist', canon_depth_raw_hist, total_iter)
         vlist = ['view_rx', 'view_ry', 'view_rz', 'view_tx', 'view_ty', 'view_tz']

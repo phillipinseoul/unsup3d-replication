@@ -4,9 +4,13 @@ from datetime import datetime
 import numpy as np
 import torch
 
-import meters
-import utils
-from dataloaders import get_data_loaders
+from . import meters
+from . import utils
+from .dataloaders import get_data_loaders
+
+# import meters
+# import utils
+# from dataloaders import get_data_loaders
 
 class Trainer():
     def __init__(self, cfgs, model):
@@ -26,7 +30,6 @@ class Trainer():
 
         self.metrics_trace = meters.MetricsTrace()
         self.make_metrics = lambda m=None: meters.StandardMetrics(m)
-
         self.model = model(cfgs)
         self.model.trainer = self
         self.train_loader, self.val_loader, self.test_loader = get_data_loaders(cfgs)
@@ -68,7 +71,8 @@ class Trainer():
             utils.clean_checkpoint(self.checkpoint_dir, keep_num=self.keep_num_checkpoint)
 
     def save_clean_checkpoint(self, path):
-        pass
+        """Save model state only to specified path."""
+        torch.save(self.model.get_model_state(), path)
 
     def test(self):
         """ Perform testing. """
@@ -105,7 +109,11 @@ class Trainer():
         ### init tensorboardX logger
         if self.use_logger:
             from tensorboardX import SummaryWriter
-            self.logger = SummaryWriter(os.path.join(self.checkpoint_dir, 'logs', datetime.now().strftime("%Y%m%d-%H%M%S")))
+
+            print('Begin logging the results in tensorboardX!')
+            self.logger = SummaryWriter(
+                os.path.join(self.checkpoint_dir, 'logs', datetime.now().strftime("%Y%m%d-%H%M%S"))
+            )
 
             ## cache one batch for visualization
             self.viz_input = self.val_loader.__iter__().__next__()
